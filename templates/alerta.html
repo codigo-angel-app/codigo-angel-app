@@ -1,0 +1,32 @@
+﻿import sqlite3
+
+def consultar_alertas():
+    try:
+        # El bloque 'with' asegura que la conexión se cierre sola al terminar
+        with sqlite3.connect('codigo_angel.db') as conexion:
+            cursor = conexion.cursor()
+            cursor.execute('SELECT id, usuario_id, fecha_hora, latitud, longitud, estado FROM alertas')
+            registros = cursor.fetchall()
+            
+            print("\n=== REGISTRO DE ALERTAS RECIBIDAS (CÓDIGO ÁNGEL) ===")
+            if not registros:
+                print("No hay alertas registradas aún.")
+                return
+
+            # Imprimimos los encabezados alineados
+            print(f"{'ID':<5} | {'Usuario/Ficha':<15} | {'Fecha y Hora':<20} | {'Lat/Long':<25} | {'Estado':<10}")
+            print("-" * 85)
+            
+            # Recorremos e imprimimos cada fila
+            for reg in registros:
+                id_alerta, usuario_id, fecha, lat, lng, estado = reg
+                ubicacion = f"{lat}, {lng}"
+                print(f"{id_alerta:<5} | {usuario_id:<15} | {fecha:<20} | {ubicacion:<25} | {estado:<10}")
+                
+            print("-" * 85)
+            
+    except sqlite3.Error as e:
+        print(f"Error al conectar con la base de datos: {e}")
+
+if __name__ == '__main__':
+    consultar_alertas()
