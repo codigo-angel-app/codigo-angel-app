@@ -5,7 +5,7 @@ import re
 import sqlite3
 from flask import Flask, render_template_string, request, jsonify, redirect, url_for
 
-# Importar la función actualizada desde codigo_angel.py (espera 2 argumentos: numero, mensaje)
+# Importar la función actualizada desde codigo_angel.py
 try:
     from codigo_angel import enviar_alerta_whatsapp
 except ImportError:
@@ -53,9 +53,10 @@ def limpiar_numero(num):
         solo_num = '58' + solo_num
     return solo_num
 
-def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
+def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion, tipo="emergencia"):
     """
-    Arma el mensaje de texto directo y lo despacha usando la función de codigo_angel.py
+    Arma el mensaje de texto directo según el evento (registro, emergencia por QR o GPS)
+    y lo despacha usando la función de codigo_angel.py
     """
     numeros_unicos = []
     for num in contactos_list:
@@ -63,12 +64,25 @@ def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
         if numero_limpio and numero_limpio not in numeros_unicos:
             numeros_unicos.append(numero_limpio)
 
-    # Mensaje de texto formateado para WhatsApp
-    mensaje_alerta = (
-        f"⚠️ ALERTA DE CÓDIGO ÁNGEL ⚠️\n"
-        f"Se ha emitido una alerta para: *{nombre_paciente}*.\n"
-        f"Accede a los detalles o ubicación GPS aquí:\n{url_ubicacion}"
-    )
+    # Definir el mensaje según el tipo de evento
+    if tipo == "registro":
+        mensaje_alerta = (
+            f"✅ CÓDIGO ÁNGEL ACTIVADO ✅\n"
+            f"Tu número ha sido registrado como contacto de emergencia para: *{nombre_paciente}*.\n"
+            f"El código ya se encuentra activo. Puedes consultar la ficha aquí:\n{url_ubicacion}"
+        )
+    elif tipo == "gps":
+        mensaje_alerta = (
+            f"📍 UBICACIÓN GPS DE EMERGENCIA 📍\n"
+            f"Se ha compartido la ubicación actual de: *{nombre_paciente}*.\n"
+            f"Ábrela en el mapa aquí:\n{url_ubicacion}"
+        )
+    else:  # tipo por defecto ("emergencia" al escanear el QR)
+        mensaje_alerta = (
+            f"⚠️ ALERTA DE CÓDIGO ÁNGEL ⚠️\n"
+            f"Se ha emitido una alerta de emergencia para: *{nombre_paciente}*.\n"
+            f"Accede a los detalles o ubicación aquí:\n{url_ubicacion}"
+        )
 
     for numero in numeros_unicos:
         try:
@@ -76,7 +90,7 @@ def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
             if not exito:
                 print(f"[CÓDIGO ÁNGEL] No se pudo entregar a {numero}: {resp}")
             else:
-                print(f"[CÓDIGO ÁNGEL] Mensaje entregado con éxito a {numero}")
+                print(f"[CÓDIGO ÁNGEL] Mensaje ({tipo}) entregado con éxito a {numero}")
         except Exception as e:
             print(f"[CÓDIGO ÁNGEL] Excepción al despachar a {numero}: {e}")
         time.sleep(1)
@@ -304,16 +318,6 @@ HTML_FICHA = """
 @app.route('/', methods=['GET', 'POST'])
 def formulario_registro():
     codigo_prellenado = request.args.get('codigo', '').strip().upper()
-
-    if codigo_prellenado:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('SELECT codigo_qr FROM usuarios WHERE codigo_qr = ?', (codigo_prellenado,))
-        registrado = cursor.fetchone()
-        conn.close()
-        if registrado:
-            return redirect(url_for('ver_ficha', codigo_qr=codigo_prellenado))
-
     return render_template_string(HTML_FORMULARIO, codigo_prellenado=codigo_prellenado, error=None)
 
 @app.route('/guardar', methods=['POST'])
@@ -337,7 +341,7 @@ def guardar_registro():
     if existente:
         conn.close()
         msg_error = f"El código '{codigo_qr}' ya se encuentra registrado a nombre de: {existente[0]}. No es posible duplicarlo."
-        return render_template_string(HTML_FORMULARIO, codigo_prellenado=codigo_qr, error=msg_error)
+        return render_template_string(HTML_FORMULARIO, codigo_prellenado="", error=msg_error)
 
     cursor.execute('''
         INSERT INTO usuarios 
@@ -348,7 +352,7 @@ def guardar_registro():
     conn.close()
 
     url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_qr}"
-    despachar_plantillas([contacto_emergencia, contacto_emergencia_2], nombre, url_ficha)
+    despachar_plantillas([contacto_emergencia, contacto_emergencia_2], nombre, url_ficha, tipo="registro")
 
     return render_template_string(HTML_EXITO, codigo=codigo_qr, nombre=nombre)
 
@@ -367,7 +371,7 @@ def ver_ficha(codigo_qr):
         c2 = usuario[6] if len(usuario) > 6 else ""
 
         url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_clean}"
-        despachar_plantillas([c1, c2], nombre, url_ficha)
+        despachar_plantillas([c1, c2], nombre, url_ficha, tipo="emergencia")
 
         return render_template_string(HTML_FICHA, usuario=usuario)
     else:
@@ -390,7 +394,7 @@ def enviar_gps():
         nombre, c1, c2 = usuario[0], usuario[1], usuario[2]
         mapa_url = f"https://maps.google.com/?q={lat},{lon}"
 
-        despachar_plantillas([c1, c2], nombre, mapa_url)
+        despachar_plantillas([c1, c2], nombre, mapa_url, tipo="gps")
         return jsonify({"status": "ok", "message": "Ubicación enviada vía WhatsApp"})
 
     return jsonify({"status": "error", "message": "Usuario no encontrado"}), 404
