@@ -5,11 +5,11 @@ import re
 import sqlite3
 from flask import Flask, render_template_string, request, jsonify, redirect, url_for
 
-# Importar la función de plantilla desde codigo_angel.py
+# Importar la función actualizada desde codigo_angel.py
 try:
     from codigo_angel import enviar_alerta_whatsapp
 except ImportError:
-    def enviar_alerta_whatsapp(numero, nombre_usuario, codigo_qr):
+    def enviar_alerta_whatsapp(numero, mensaje):
         print(f"[ERROR CÓDIGO ÁNGEL] No se encontró codigo_angel.py. No se pudo enviar a {numero}")
         return False, "Falta archivo codigo_angel.py"
 
@@ -55,8 +55,7 @@ def limpiar_numero(num):
 
 def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
     """
-    Despacha las alertas enviando los 3 parámetros que requiere la plantilla
-    'alerta_codigo_angel' en codigo_angel.py
+    Arma el mensaje de texto directo y lo despacha usando la función de codigo_angel.py
     """
     numeros_unicos = []
     for num in contactos_list:
@@ -64,15 +63,22 @@ def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
         if numero_limpio and numero_limpio not in numeros_unicos:
             numeros_unicos.append(numero_limpio)
 
+    # Mensaje de texto formateado para WhatsApp
+    mensaje_alerta = (
+        f"⚠️ ALERTA DE CÓDIGO ÁNGEL ⚠️\n"
+        f"Se ha emitido una alerta para: *{nombre_paciente}*.\n"
+        f"Accede a los detalles o ubicación GPS aquí:\n{url_ubicacion}"
+    )
+
     for numero in numeros_unicos:
         try:
-            exito, resp = enviar_alerta_whatsapp(numero, nombre_paciente, url_ubicacion)
+            exito, resp = enviar_alerta_whatsapp(numero, mensaje_alerta)
             if not exito:
-                print(f"[CÓDIGO ÁNGEL] No se pudo entregar plantilla a {numero}: {resp}")
+                print(f"[CÓDIGO ÁNGEL] No se pudo entregar a {numero}: {resp}")
             else:
-                print(f"[CÓDIGO ÁNGEL] Plantilla entregada con éxito a {numero}")
+                print(f"[CÓDIGO ÁNGEL] Mensaje entregado con éxito a {numero}")
         except Exception as e:
-            print(f"[CÓDIGO ÁNGEL] Excepción al despachar plantilla a {numero}: {e}")
+            print(f"[CÓDIGO ÁNGEL] Excepción al despachar a {numero}: {e}")
         time.sleep(1)
 
 # --- PLANTILLAS HTML ---
@@ -264,7 +270,7 @@ HTML_FICHA = """
                     .then(response => response.json())
                     .then(data => {
                         if(data.status === 'ok') {
-                            btn.innerText = "¡UBICACIÓN ENVIADA POR META!";
+                            btn.innerText = "¡UBICACIÓN ENVIADA POR WHATSAPP!";
                             btn.style.background = "#28a745";
                         } else {
                             btn.innerText = "ERROR AL ENVIAR UBICACIÓN";
@@ -341,7 +347,6 @@ def guardar_registro():
     conn.commit()
     conn.close()
 
-    # Se envía la confirmación de registro enviando el enlace de consulta de la ficha
     url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_qr}"
     despachar_plantillas([contacto_emergencia, contacto_emergencia_2], nombre, url_ficha)
 
@@ -361,7 +366,6 @@ def ver_ficha(codigo_qr):
         c1 = usuario[5]
         c2 = usuario[6] if len(usuario) > 6 else ""
 
-        # Notificación inicial al escanear la ficha
         url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_clean}"
         despachar_plantillas([c1, c2], nombre, url_ficha)
 
@@ -386,11 +390,10 @@ def enviar_gps():
         nombre, c1, c2 = usuario[0], usuario[1], usuario[2]
         mapa_url = f"https://maps.google.com/?q={lat},{lon}"
 
-        # Despacha la plantilla pasando nombre y el mapa GPS exacto
         despachar_plantillas([c1, c2], nombre, mapa_url)
-        return jsonify({"status": "ok", "message": "Ubicación enviada vía Meta API"})
+        return jsonify({"status": "ok", "message": "Ubicación enviada vía WhatsApp"})
 
-    return jsonify({"status": "error", "message": "Usuario no encontrado"}), 404
+    return jsonify({"status": "error", "message": "Usuario no encontrado"}}, 404
 
 # --- ENDPOINT DE VERIFICACIÓN WEBHOOK META / WHATSAPP ---
 @app.route('/webhook', methods=['GET', 'POST'])
