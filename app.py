@@ -5,11 +5,11 @@ import re
 import sqlite3
 from flask import Flask, render_template_string, request, jsonify, redirect, url_for
 
-# Importar la función de plantilla desde codigo_angel.py
+# Importar la función actualizada desde codigo_angel.py (espera 2 argumentos: numero, mensaje)
 try:
     from codigo_angel import enviar_alerta_whatsapp
 except ImportError:
-    def enviar_alerta_whatsapp(numero, nombre_usuario, codigo_qr):
+    def enviar_alerta_whatsapp(numero, mensaje):
         print(f"[ERROR CÓDIGO ÁNGEL] No se encontró codigo_angel.py. No se pudo enviar a {numero}")
         return False, "Falta archivo codigo_angel.py"
 
@@ -17,6 +17,7 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "codigo_angel.db")
+VERIFY_TOKEN = "codigo_angel_2026"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -52,25 +53,35 @@ def limpiar_numero(num):
         solo_num = '58' + solo_num
     return solo_num
 
-def despachar_alertas_plantilla(contactos_list, nombre_usuario, codigo_qr):
-    """Envía la plantilla 'alerta_codigo_angel' aprobada por Meta a la lista de contactos."""
+def despachar_plantillas(contactos_list, nombre_paciente, url_ubicacion):
+    """
+    Arma el mensaje de texto directo y lo despacha usando la función de codigo_angel.py
+    """
     numeros_unicos = []
     for num in contactos_list:
         numero_limpio = limpiar_numero(num)
         if numero_limpio and numero_limpio not in numeros_unicos:
             numeros_unicos.append(numero_limpio)
 
+    # Mensaje de texto formateado para WhatsApp
+    mensaje_alerta = (
+        f"⚠️ ALERTA DE CÓDIGO ÁNGEL ⚠️\n"
+        f"Se ha emitido una alerta para: *{nombre_paciente}*.\n"
+        f"Accede a los detalles o ubicación GPS aquí:\n{url_ubicacion}"
+    )
+
     for numero in numeros_unicos:
         try:
-            exito, resp = enviar_alerta_whatsapp(numero, nombre_usuario, codigo_qr)
+            exito, resp = enviar_alerta_whatsapp(numero, mensaje_alerta)
             if not exito:
-                print(f"[CÓDIGO ÁNGEL] No se pudo entregar plantilla a {numero}: {resp}")
+                print(f"[CÓDIGO ÁNGEL] No se pudo entregar a {numero}: {resp}")
             else:
-                print(f"[CÓDIGO ÁNGEL] Plantilla entregada con éxito a {numero}")
+                print(f"[CÓDIGO ÁNGEL] Mensaje entregado con éxito a {numero}")
         except Exception as e:
             print(f"[CÓDIGO ÁNGEL] Excepción al despachar a {numero}: {e}")
         time.sleep(1)
 
+# --- PLANTILLAS HTML ---
 HTML_FORMULARIO = """
 <!DOCTYPE html>
 <html lang="es">
@@ -93,13 +104,9 @@ HTML_FORMULARIO = """
 <body>
     <div class="form-box">
         <h2>REGISTRO CÓDIGO ÁNGEL</h2>
-
         {% if error %}
-        <div class="alerta-error">
-            ⚠️ {{ error }}
-        </div>
+        <div class="alerta-error">⚠️ {{ error }}</div>
         {% endif %}
-
         <form action="/guardar" method="POST">
             <label>Código asignado (ej. ANGEL-001):</label>
             <input type="text" name="codigo_qr" required placeholder="ANGEL-XXX" value="{{ codigo_prellenado }}">
@@ -110,14 +117,10 @@ HTML_FORMULARIO = """
             <label>Tipo de Sangre:</label>
             <select name="tipo_sangre" required>
                 <option value="">Seleccione...</option>
-                <option value="O+">O+</option>
-                <option value="O-">O-</option>
-                <option value="A+">A+</option>
-                <option value="A-">A-</option>
-                <option value="B+">B+</option>
-                <option value="B-">B-</option>
-                <option value="AB+">AB+</option>
-                <option value="AB-">AB-</option>
+                <option value="O+">O+</option><option value="O-">O-</option>
+                <option value="A+">A+</option><option value="A-">A-</option>
+                <option value="B+">B+</option><option value="B-">B-</option>
+                <option value="AB+">AB+</option><option value="AB-">AB-</option>
             </select>
 
             <label>Alergias:</label>
@@ -140,7 +143,7 @@ HTML_FORMULARIO = """
 
             <div class="seccion-servidor" id="seccion_servidor">
                 <label>Rango / Jerarquía:</label>
-                <input type="text" name="rango" placeholder="Ej: Sargento Primero, Oficial, Inspector">
+                <input type="text" name="rango" placeholder="Ej: Sargento Primero, Oficial">
 
                 <label>Destacamento / Unidad / Base:</label>
                 <input type="text" name="destacamento" placeholder="Ej: D-625, Estación N° 1">
@@ -149,7 +152,6 @@ HTML_FORMULARIO = """
             <button type="submit">GUARDAR Y ACTIVAR CÓDIGO</button>
         </form>
     </div>
-
     <script>
     function toggleServidorPublico() {
         let val = document.getElementById('es_servidor_publico').value;
@@ -268,7 +270,7 @@ HTML_FICHA = """
                     .then(response => response.json())
                     .then(data => {
                         if(data.status === 'ok') {
-                            btn.innerText = "¡UBICACIÓN ENVIADA POR META!";
+                            btn.innerText = "¡UBICACIÓN ENVIADA POR WHATSAPP!";
                             btn.style.background = "#28a745";
                         } else {
                             btn.innerText = "ERROR AL ENVIAR UBICACIÓN";
@@ -298,6 +300,7 @@ HTML_FICHA = """
 </html>
 """
 
+# --- RUTAS PRINCIPALES DEL SISTEMA ---
 @app.route('/', methods=['GET', 'POST'])
 def formulario_registro():
     codigo_prellenado = request.args.get('codigo', '').strip().upper()
@@ -344,8 +347,8 @@ def guardar_registro():
     conn.commit()
     conn.close()
 
-    # Se despacha la plantilla de activación
-    despachar_alertas_plantilla([contacto_emergencia, contacto_emergencia_2], nombre, codigo_qr)
+    url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_qr}"
+    despachar_plantillas([contacto_emergencia, contacto_emergencia_2], nombre, url_ficha)
 
     return render_template_string(HTML_EXITO, codigo=codigo_qr, nombre=nombre)
 
@@ -363,8 +366,8 @@ def ver_ficha(codigo_qr):
         c1 = usuario[5]
         c2 = usuario[6] if len(usuario) > 6 else ""
 
-        # Enviar notificación vía Plantilla Aprobada de Meta
-        despachar_alertas_plantilla([c1, c2], nombre, codigo_clean)
+        url_ficha = f"https://codigoangel.pythonanywhere.com/escaneo/{codigo_clean}"
+        despachar_plantillas([c1, c2], nombre, url_ficha)
 
         return render_template_string(HTML_FICHA, usuario=usuario)
     else:
@@ -384,15 +387,34 @@ def enviar_gps():
     conn.close()
 
     if usuario:
-        nombre = usuario[0]
-        c1 = usuario[1]
-        c2 = usuario[2] if len(usuario) > 2 else ""
+        nombre, c1, c2 = usuario[0], usuario[1], usuario[2]
+        mapa_url = f"https://maps.google.com/?q={lat},{lon}"
 
-        # Despachar notificación de ubicación GPS
-        despachar_alertas_plantilla([c1, c2], nombre, codigo_qr)
-        return jsonify({"status": "ok", "message": "Ubicación enviada vía Meta API"})
+        despachar_plantillas([c1, c2], nombre, mapa_url)
+        return jsonify({"status": "ok", "message": "Ubicación enviada vía WhatsApp"})
 
     return jsonify({"status": "error", "message": "Usuario no encontrado"}), 404
+
+# --- ENDPOINT DE VERIFICACIÓN WEBHOOK META / WHATSAPP ---
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'GET':
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+
+        if mode == 'subscribe' and token == VERIFY_TOKEN:
+            print("[CÓDIGO ÁNGEL] Webhook verificado con éxito por Meta.")
+            return challenge, 200
+        return "Token inválido", 403
+
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            print("[CÓDIGO ÁNGEL] Notificación recibida desde WhatsApp:", data)
+        except Exception as e:
+            print(f"[CÓDIGO ÁNGEL] Error procesando POST de Webhook: {e}")
+        return jsonify({"status": "recibido"}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
