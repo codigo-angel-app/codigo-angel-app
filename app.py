@@ -420,5 +420,19 @@ def webhook():
             print(f"[CÓDIGO ÁNGEL] Error procesando POST de Webhook: {e}")
         return jsonify({"status": "recibido"}), 200
 
+@app.route('/qr/<codigo_qr>')
+def qr_directo(codigo_qr):
+    """Redirige directamente al chat de WhatsApp con el número real de emergencia"""
+    codigo_clean = codigo_qr.strip().upper()
+    numero_whatsapp = "584249501774"  # Número real de pruebas configurado
+    
+    mensaje = f"¡Hola! Necesito asistencia de emergencia. Mi código de brazalete es: {codigo_clean}"
+    
+    import urllib.parse
+    mensaje_codificado = urllib.parse.quote(mensaje)
+    
+    enlace_whatsapp = f"https://wa.me/{numero_whatsapp}?text={mensaje_codificado}"
+    return redirect(enlace_whatsapp)
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
