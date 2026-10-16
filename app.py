@@ -424,7 +424,8 @@ def webhook():
 def qr_directo(codigo_qr):
     """Redirige directamente al chat de WhatsApp con el número real de emergencia"""
     codigo_clean = codigo_qr.strip().upper()
-    numero_whatsapp = "584249501774"  # Número real de pruebas configurado
+# En lugar de enviar solo al número de prueba, despachamos a los contactos del usuario:
+despachar_plantillas([c1, c2], nombre, url_ficha, tipo="emergencia")
     
     mensaje = f"¡Hola! Necesito asistencia de emergencia. Mi código de brazalete es: {codigo_clean}"
     
